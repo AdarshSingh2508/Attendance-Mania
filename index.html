@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance Mania</title>
+<meta name="description" content="Track your 75% attendance rule. See how many classes you can skip, or how many you must attend to recover.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { fontFamily: { sans: ['"Bricolage Grotesque"', 'system-ui', 'sans-serif'] } } }
+  };
+</script>
+<script>
+  // Apply saved theme before paint to avoid a flash.
+  (function () {
+    try {
+      var t = localStorage.getItem('attendance-mania:theme');
+      var dark = t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (dark) document.documentElement.classList.add('dark');
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #eef1ea;
+    --bg-grid: rgba(20, 33, 61, .045);
+    --surface: #fbfcf8;
+    --surface-2: #e6eadf;
+    --ink: #16213a;
+    --ink-soft: #55607a;
+    --line: #cdd4c6;
+    --accent: #16213a;
+    --accent-ink: #fbfcf8;
+    --safe: #14754a;
+    --safe-bg: #d6efe0;
+    --danger: #b3261e;
+    --danger-bg: #f8dcd8;
+    --idle: #6b7390;
+    --idle-bg: #e0e3ec;
+    --track: #d8dccf;
+    --mark: #16213a;
+  }
+  .dark {
+    --bg: #0e1424;
+    --bg-grid: rgba(220, 228, 255, .04);
+    --surface: #161e33;
+    --surface-2: #1d2742;
+    --ink: #e8ecf8;
+    --ink-soft: #99a3c0;
+    --line: #2a3556;
+    --accent: #f2c14e;
+    --accent-ink: #1a1503;
+    --safe: #5fd39a;
+    --safe-bg: #123a2a;
+    --danger: #ff8a80;
+    --danger-bg: #43191a;
+    --idle: #9aa3c4;
+    --idle-bg: #232c47;
+    --track: #25304f;
+    --mark: #e8ecf8;
+  }
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body {
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1;
+  }
+  .surface { background: var(--surface); border: 1px solid var(--line); }
+  .soft { color: var(--ink-soft); }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { border: 1px solid var(--line); color: var(--ink); background: transparent; }
+  .btn-ghost:hover { background: var(--surface-2); }
+  .field {
+    background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+  }
+  .field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .bar-track { background: var(--track); }
+  .bar-fill { transition: width .45s cubic-bezier(.2,.8,.2,1), background-color .3s; }
+  .bar-mark { background: var(--mark); }
+
+  .act { border: 1px solid var(--line); background: var(--surface); transition: transform .08s, background-color .15s; }
+  .act:active { transform: scale(.97); }
+  .act-present:hover { background: var(--safe-bg); border-color: var(--safe); color: var(--safe); }
+  .act-absent:hover { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+  .act-skip:hover { background: var(--idle-bg); border-color: var(--idle); }
+
+  .badge-safe { background: var(--safe-bg); color: var(--safe); }
+  .badge-danger { background: var(--danger-bg); color: var(--danger); }
+  .badge-idle { background: var(--idle-bg); color: var(--idle); }
+
+  .dot-P { background: var(--safe); }
+  .dot-A { background: var(--danger); }
+  .dot-C { background: transparent; border: 1.5px solid var(--idle); }
+
+  dialog { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+  dialog::backdrop { background: rgba(8, 12, 24, .55); }
+
+  @keyframes pop { from { transform: scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
+  dialog[open] { animation: pop .18s ease-out; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body class="font-sans min-h-screen antialiased">
+
+<div class="mx-auto max-w-6xl px-4 sm:px-6 pb-24">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between gap-3 py-5">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="h-10 w-10 shrink-0 rounded-xl btn-primary grid place-items-center font-extrabold text-lg" aria-hidden="true">75</div>
+      <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight truncate">Attendance Mania</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="themeToggle" type="button" class="btn-ghost h-10 w-10 rounded-xl grid place-items-center" aria-label="Switch theme" title="Switch theme">
+        <svg id="iconSun" class="h-5 w-5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg id="iconMoon" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <button id="addBtn" type="button" class="btn-primary h-10 rounded-xl px-4 font-semibold text-sm flex items-center gap-2">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Add subject</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Overview -->
+  <section id="overview" class="surface rounded-2xl p-5 sm:p-6 mb-6" aria-live="polite"></section>
+
+  <!-- Subjects -->
+  <section id="subjects" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Subjects"></section>
+
+  <!-- Empty state -->
+  <section id="empty" class="hidden surface rounded-2xl p-8 sm:p-12 text-center">
+    <h2 class="text-2xl font-bold mb-2">No subjects yet</h2>
+    <p class="soft max-w-md mx-auto mb-6">Add your first subject with the classes held and attended so far. Everything is saved in this browser.</p>
+    <button id="emptyAdd" type="button" class="btn-primary rounded-xl px-5 py-3 font-semibold">Add subject</button>
+  </section>
+
+  <footer class="mt-10 text-sm soft">
+    Rule used: attendance must stay at or above <span id="targetLabel" class="font-semibold"></span>. Cancelled classes and holidays don't count as held.
+  </footer>
+</div>
+
+<!-- Add / edit dialog -->
+<dialog id="subjectDialog" class="rounded-2xl p-0 w-[min(92vw,26rem)]">
+  <form id="subjectForm" method="dialog" class="p-6" novalidate>
+    <h2 id="dialogTitle" class="text-xl font-bold mb-4">Add subject</h2>
+
+    <label class="block text-sm font-medium mb-1" for="fName">Subject name</label>
+    <input id="fName" class="field w-full rounded-lg px-3 py-2.5 mb-4" type="text" maxlength="60" placeholder="e.g. Data Structures" autocomplete="off">
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm font-medium mb-1" for="fTotal">Classes held</label>
+        <input id="fTotal" class="field w-full rounded-lg px-3 py-2.5" type="number" inputmode="numeric" min="0" step="1" value="0">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1" for="fAttended">Classes attended</label>
+        <input id="fAttended" class="field w-full rounded-lg px-3 py-2.5" type="number" inputmode="numeric" min="0" step="1" value="0">
+      </div>
+    </div>
+
+    <p id="formError" class="mt-3 text-sm font-medium min-h-[1.25rem]" style="color: var(--danger)" role="alert"></p>
+
+    <div class="mt-4 flex justify-end gap-2">
+      <button type="button" id="cancelDialog" class="btn-ghost rounded-xl px-4 py-2.5 font-semibold text-sm">Cancel</button>
+      <button type="submit" id="saveDialog" class="btn-primary rounded-xl px-5 py-2.5 font-semibold text-sm">Save subject</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Delete dialog -->
+<dialog id="deleteDialog" class="rounded-2xl p-0 w-[min(92vw,24rem)]">
+  <div class="p-6">
+    <h2 class="text-xl font-bold mb-2">Delete <span id="delName"></span>?</h2>
+    <p class="soft text-sm mb-5">Its attendance record will be removed from this browser. This can't be undone.</p>
+    <div class="flex justify-end gap-2">
+      <button type="button" id="delCancel" class="btn-ghost rounded-xl px-4 py-2.5 font-semibold text-sm">Keep it</button>
+      <button type="button" id="delConfirm" class="rounded-xl px-5 py-2.5 font-semibold text-sm" style="background: var(--danger); color: #fff">Delete subject</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Toast -->
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 pointer-events-none opacity-0 transition-opacity duration-200">
+  <div id="toastText" class="btn-primary rounded-xl px-4 py-2.5 text-sm font-semibold shadow-lg"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var TARGET = 75;                         // required attendance percentage
+  var STORAGE_KEY = 'attendance-mania:v1';
+  var THEME_KEY = 'attendance-mania:theme';
+  var MAX_HISTORY = 12;
+
+  // <calc>
+  /**
+   * Core 75% engine. Works in integers to avoid floating point errors.
+   * T = total held, A = attended, target as a whole percentage.
+   */
+  function calc(attended, total, target) {
+    target = target === undefined ? 75 : target;
+    attended = Math.max(0, Math.floor(Number(attended) || 0));
+    total = Math.max(0, Math.floor(Number(total) || 0));
+    if (attended > total) attended = total;
+
+    if (total === 0) {
+      return { status: 'idle', percent: null, skip: 0, need: 0, attended: attended, total: total };
+    }
+    var percent = (attended / total) * 100;
+    // attended/total >= target/100  <=>  100*A >= target*T
+    if (100 * attended >= target * total) {
+      // Largest k with 100*A >= target*(T+k)
+      var skip = Math.floor((100 * attended - target * total) / target);
+      return { status: 'safe', percent: percent, skip: skip, need: 0, attended: attended, total: total };
+    }
+    // Smallest x with 100*(A+x) >= target*(T+x)  =>  x >= (target*T - 100*A) / (100 - target)
+    var need = Math.ceil((target * total - 100 * attended) / (100 - target));
+    return { status: 'danger', percent: percent, skip: 0, need: need, attended: attended, total: total };
+  }
+  // </calc>
+
+  // ---------- State ----------
+  var subjects = load();
+  var editingId = null;
+  var deletingId = null;
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return [];
+      var data = JSON.parse(raw);
+      if (!Array.isArray(data)) return [];
+      return data.filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) {
+        var total = Math.max(0, Math.floor(Number(s.total) || 0));
+        var attended = Math.min(total, Math.max(0, Math.floor(Number(s.attended) || 0)));
+        return {
+          id: s.id,
+          name: String(s.name || 'Untitled').slice(0, 60),
+          total: total,
+          attended: attended,
+          history: Array.isArray(s.history) ? s.history.filter(function (h) { return h === 'P' || h === 'A' || h === 'C'; }).slice(-MAX_HISTORY) : []
+        };
+      });
+    } catch (e) { return []; }
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(subjects)); }
+    catch (e) { toast('Could not save. Browser storage may be full or blocked.'); }
+  }
+
+  function uid() {
+    return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  // ---------- Helpers ----------
+  var $ = function (id) { return document.getElementById(id); };
+
+  function esc(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmtPct(p) {
+    if (p === null) return '–';
+    var r = Math.round(p * 10) / 10;
+    return (r % 1 === 0 ? r.toFixed(0) : r.toFixed(1)) + '%';
+  }
+
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  var toastTimer;
+  function toast(msg) {
+    $('toastText').textContent = msg;
+    var t = $('toast');
+    t.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.style.opacity = '0'; }, 2200);
+  }
+
+  // ---------- Rendering ----------
+  function headline(r) {
+    if (r.status === 'idle') {
+      return { text: 'No classes logged yet', sub: 'Mark your first class to start tracking.' };
+    }
+    if (r.status === 'safe') {
+      if (r.skip === 0) {
+        return { text: 'You can\u2019t skip the next class', sub: 'You\u2019re right on the line. One miss drops you below ' + TARGET + '%.' };
+      }
+      return { text: 'You can skip ' + plural(r.skip, 'class', 'classes'), sub: 'and still stay at or above ' + TARGET + '%.' };
+    }
+    return { text: 'Attend the next ' + plural(r.need, 'class', 'classes') + ' in a row', sub: 'to get back to ' + TARGET + '%.' };
+  }
+
+  function badge(r) {
+    if (r.status === 'idle') return '<span class="badge-idle rounded-full px-2.5 py-1 text-xs font-semibold">No data</span>';
+    if (r.status === 'safe') return '<span class="badge-safe rounded-full px-2.5 py-1 text-xs font-semibold">Safe</span>';
+    return '<span class="badge-danger rounded-full px-2.5 py-1 text-xs font-semibold">Shortage</span>';
+  }
+
+  function card(s) {
+    var r = calc(s.attended, s.total, TARGET);
+    var h = headline(r);
+    var fillColor = r.status === 'safe' ? 'var(--safe)' : r.status === 'danger' ? 'var(--danger)' : 'var(--idle)';
+    var width = r.percent === null ? 0 : Math.min(100, r.percent);
+    var dots = s.history.length
+      ? s.history.map(function (x) {
+          var label = x === 'P' ? 'Present' : x === 'A' ? 'Absent' : 'Cancelled';
+          return '<span class="dot-' + x + ' inline-block h-2.5 w-2.5 rounded-full" title="' + label + '"></span>';
+        }).join('')
+      : '<span class="soft text-xs">No recent activity</span>';
+
+    return '' +
+    '<article class="surface rounded-2xl p-5 flex flex-col" data-id="' + s.id + '">' +
+      '<div class="flex items-start justify-between gap-3">' +
+        '<h3 class="text-lg font-bold leading-snug break-words min-w-0">' + esc(s.name) + '</h3>' +
+        badge(r) +
+      '</div>' +
+
+      '<div class="mt-4 flex items-end justify-between gap-3">' +
+        '<div class="text-5xl font-extrabold tracking-tight leading-none" style="color:' + (r.status === 'idle' ? 'var(--ink-soft)' : fillColor) + '">' + fmtPct(r.percent) + '</div>' +
+        '<div class="soft text-sm text-right">' + s.attended + ' of ' + s.total + ' attended</div>' +
+      '</div>' +
+
+      '<div class="relative mt-4 mb-1" role="img" aria-label="Attendance ' + fmtPct(r.percent) + ', required ' + TARGET + '%">' +
+        '<div class="bar-track h-3 rounded-full overflow-hidden"><div class="bar-fill h-full rounded-full" style="width:' + width + '%;background:' + fillColor + '"></div></div>' +
+        '<div class="bar-mark absolute -top-1 h-5 w-0.5 rounded" style="left:' + TARGET + '%" aria-hidden="true"></div>' +
+      '</div>' +
+      '<div class="relative h-4 soft text-xs" aria-hidden="true"><span class="absolute -translate-x-1/2 font-semibold" style="left:' + TARGET + '%">' + TARGET + '%</span></div>' +
+
+      '<div class="mt-2 rounded-xl p-3" style="background:var(--surface-2)">' +
+        '<p class="font-bold leading-snug">' + esc(h.text) + '</p>' +
+        '<p class="soft text-sm mt-0.5">' + esc(h.sub) + '</p>' +
+      '</div>' +
+
+      '<div class="mt-4 grid grid-cols-3 gap-2">' +
+        '<button type="button" class="act act-present rounded-xl py-2.5 text-sm font-semibold" data-act="P" aria-label="Mark present for ' + esc(s.name) + '">Present</button>' +
+        '<button type="button" class="act act-absent rounded-xl py-2.5 text-sm font-semibold" data-act="A" aria-label="Mark absent for ' + esc(s.name) + '">Absent</button>' +
+        '<button type="button" class="act act-skip rounded-xl py-2.5 text-sm font-semibold leading-tight" data-act="C" aria-label="Cancelled or holiday for ' + esc(s.name) + '">Cancelled</button>' +
+      '</div>' +
+
+      '<div class="mt-4 flex items-center justify-between gap-2">' +
+        '<div class="flex items-center gap-1" aria-label="Recent classes">' + dots + '</div>' +
+        '<div class="flex items-center gap-1">' +
+          '<button type="button" class="btn-ghost rounded-lg px-2.5 py-1.5 text-xs font-semibold" data-act="undo"' + (s.history.length ? '' : ' disabled style="opacity:.4;cursor:not-allowed"') + '>Undo</button>' +
+          '<button type="button" class="btn-ghost rounded-lg px-2.5 py-1.5 text-xs font-semibold" data-act="edit">Edit</button>' +
+          '<button type="button" class="btn-ghost rounded-lg px-2.5 py-1.5 text-xs font-semibold" data-act="delete">Delete</button>' +
+        '</div>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function renderOverview() {
+    var el = $('overview');
+    if (!subjects.length) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+
+    var totalAll = 0, attendedAll = 0, safe = 0, danger = 0;
+    subjects.forEach(function (s) {
+      totalAll += s.total; attendedAll += s.attended;
+      var r = calc(s.attended, s.total, TARGET);
+      if (r.status === 'safe') safe++; else if (r.status === 'danger') danger++;
+    });
+    var overall = calc(attendedAll, totalAll, TARGET);
+    var color = overall.status === 'safe' ? 'var(--safe)' : overall.status === 'danger' ? 'var(--danger)' : 'var(--ink-soft)';
+
+    el.innerHTML =
+      '<div class="flex flex-wrap items-center gap-x-8 gap-y-4">' +
+        '<div>' +
+          '<div class="soft text-sm font-medium">Overall attendance</div>' +
+          '<div class="text-4xl font-extrabold tracking-tight" style="color:' + color + '">' + fmtPct(overall.percent) + '</div>' +
+        '</div>' +
+        '<div class="flex flex-wrap gap-3">' +
+          '<div class="badge-safe rounded-xl px-4 py-2"><span class="text-xl font-extrabold">' + safe + '</span> <span class="text-sm font-semibold">on track</span></div>' +
+          '<div class="badge-danger rounded-xl px-4 py-2"><span class="text-xl font-extrabold">' + danger + '</span> <span class="text-sm font-semibold">in shortage</span></div>' +
+        '</div>' +
+        '<div class="soft text-sm ml-auto">' + attendedAll + ' attended of ' + totalAll + ' held across ' + plural(subjects.length, 'subject', 'subjects') + '</div>' +
+      '</div>';
+  }
+
+  function render() {
+    $('subjects').innerHTML = subjects.map(card).join('');
+    $('empty').classList.toggle('hidden', subjects.length > 0);
+    renderOverview();
+  }
+
+  // ---------- Actions ----------
+  function find(id) { return subjects.find(function (s) { return s.id === id; }); }
+
+  function logAction(id, type) {
+    var s = find(id);
+    if (!s) return;
+    if (type === 'P') { s.total += 1; s.attended += 1; }
+    else if (type === 'A') { s.total += 1; }
+    // 'C' (cancelled / holiday): totals stay the same
+    s.history.push(type);
+    if (s.history.length > MAX_HISTORY) s.history.shift();
+    save(); render();
+    toast(type === 'P' ? 'Marked present' : type === 'A' ? 'Marked absent' : 'Cancelled, no change to totals');
+  }
+
+  function undo(id) {
+    var s = find(id);
+    if (!s || !s.history.length) return;
+    var last = s.history.pop();
+    if (last === 'P') { s.total = Math.max(0, s.total - 1); s.attended = Math.max(0, s.attended - 1); }
+    else if (last === 'A') { s.total = Math.max(0, s.total - 1); }
+    if (s.attended > s.total) s.attended = s.total;
+    save(); render();
+    toast('Undid last entry');
+  }
+
+  // ---------- Dialogs ----------
+  var dlg = $('subjectDialog');
+  var form = $('subjectForm');
+
+  function openForm(id) {
+    editingId = id || null;
+    var s = id ? find(id) : null;
+    $('dialogTitle').textContent = s ? 'Edit subject' : 'Add subject';
+    $('fName').value = s ? s.name : '';
+    $('fTotal').value = s ? s.total : 0;
+    $('fAttended').value = s ? s.attended : 0;
+    $('formError').textContent = '';
+    dlg.showModal();
+    $('fName').focus();
+  }
+
+  function parseCount(v) {
+    if (String(v).trim() === '') return NaN;
+    var n = Number(v);
+    return Number.isInteger(n) ? n : NaN;
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var name = $('fName').value.trim();
+    var total = parseCount($('fTotal').value);
+    var attended = parseCount($('fAttended').value);
+    var err = '';
+
+    if (!name) err = 'Enter a subject name.';
+    else if (isNaN(total) || total < 0) err = 'Classes held must be a whole number, 0 or more.';
+    else if (isNaN(attended) || attended < 0) err = 'Classes attended must be a whole number, 0 or more.';
+    else if (attended > total) err = 'Classes attended can\u2019t be more than classes held.';
+
+    if (err) { $('formError').textContent = err; return; }
+
+    if (editingId) {
+      var s = find(editingId);
+      if (s) { s.name = name; s.total = total; s.attended = attended; }
+      toast('Saved changes');
+    } else {
+      subjects.push({ id: uid(), name: name, total: total, attended: attended, history: [] });
+      toast('Subject added');
+    }
+    save(); render();
+    dlg.close();
+  });
+
+  $('cancelDialog').addEventListener('click', function () { dlg.close(); });
+
+  var delDlg = $('deleteDialog');
+  function openDelete(id) {
+    var s = find(id);
+    if (!s) return;
+    deletingId = id;
+    $('delName').textContent = s.name;
+    delDlg.showModal();
+  }
+  $('delCancel').addEventListener('click', function () { delDlg.close(); });
+  $('delConfirm').addEventListener('click', function () {
+    subjects = subjects.filter(function (s) { return s.id !== deletingId; });
+    deletingId = null;
+    save(); render();
+    delDlg.close();
+    toast('Subject deleted');
+  });
+
+  // Close dialogs when clicking the backdrop
+  [dlg, delDlg].forEach(function (d) {
+    d.addEventListener('click', function (e) {
+      var r = d.getBoundingClientRect();
+      var inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) d.close();
+    });
+  });
+
+  // ---------- Wiring ----------
+  $('addBtn').addEventListener('click', function () { openForm(); });
+  $('emptyAdd').addEventListener('click', function () { openForm(); });
+
+  $('subjects').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-act]');
+    if (!btn || btn.disabled) return;
+    var cardEl = btn.closest('[data-id]');
+    if (!cardEl) return;
+    var id = cardEl.getAttribute('data-id');
+    var act = btn.getAttribute('data-act');
+    if (act === 'P' || act === 'A' || act === 'C') logAction(id, act);
+    else if (act === 'undo') undo(id);
+    else if (act === 'edit') openForm(id);
+    else if (act === 'delete') openDelete(id);
+  });
+
+  // Theme toggle
+  function syncThemeIcons() {
+    var dark = document.documentElement.classList.contains('dark');
+    $('iconSun').classList.toggle('hidden', !dark);
+    $('iconMoon').classList.toggle('hidden', dark);
+  }
+  $('themeToggle').addEventListener('click', function () {
+    var dark = document.documentElement.classList.toggle('dark');
+    try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch (e) {}
+    syncThemeIcons();
+  });
+
+  // Keep multiple tabs in sync
+  window.addEventListener('storage', function (e) {
+    if (e.key === STORAGE_KEY) { subjects = load(); render(); }
+  });
+
+  $('targetLabel').textContent = TARGET + '%';
+  syncThemeIcons();
+  render();
+})();
+</script>
+</body>
+</html>
